@@ -1,6 +1,8 @@
 """Build the website from public Pixelforge-Ports repositories and releases."""
 from pathlib import Path
-import html, json, re
+import html
+import json
+import re
 
 from github_catalog import discover
 from game_requirements import game_requirements
@@ -32,15 +34,15 @@ def prose(s):
     for p in s.strip().split('\n\n'):
         if p.startswith('```'):
             result.append(
-                '<pre><code>' +
-                esc('\n'.join(p.splitlines()[1:-1])) +
-                '</code></pre>'
+                '<pre><code>'
+                + esc('\n'.join(p.splitlines()[1:-1]))
+                + '</code></pre>'
             )
         else:
             result.append(
-                '<p>' +
-                inline(p.replace('\n', ' ')) +
-                '</p>'
+                '<p>'
+                + inline(p.replace('\n', ' '))
+                + '</p>'
             )
 
     return ''.join(result)
@@ -130,13 +132,51 @@ for record in records:
 
     requirements = game_requirements(readme)
 
+    requirement_instructions = requirements.get('instructions') or ''
+
+    # Detect Android ports even when game_requirements.py cannot detect them.
+    #
+    # Some ports, such as Need for Speed: Most Wanted, use "## Installation"
+    # rather than a "## Get ..." section. Check the complete README and
+    # package metadata for APK/OBB references instead of relying only on
+    # game_requirements.py.
+    android_source = '\n'.join([
+        readme,
+        str(meta.get('desc') or ''),
+        str(meta.get('inst') or ''),
+        requirement_instructions,
+    ])
+
+    android_hint = bool(
+        re.search(
+            r'\bAPK\b|\.apk\b|\bOBB\b|\.obb\b',
+            android_source,
+            re.I
+        )
+    )
+
+    is_android = (
+        requirements.get('platform') == 'Android'
+        or android_hint
+    )
+
+    game_platform = (
+        'Android'
+        if is_android
+        else requirements.get('platform', 'Windows')
+    )
+
     data.update(
         title=title,
         description=meta['desc'],
         genres=meta['genres'],
-        windows_version=requirements['windows_version'],
-        game_version=requirements['game_version'],
-        game_platform=requirements['platform']
+        windows_version=(
+            None
+            if is_android
+            else requirements.get('windows_version')
+        ),
+        game_version=requirements.get('game_version'),
+        game_platform=game_platform
     )
 
     catalog.append(data)
@@ -233,39 +273,39 @@ for record in records:
         )
 
     game_data = (
-        requirements['instructions']
+        requirement_instructions
         or meta.get(
             'inst',
             'See the repository README for required game files.'
         )
     )
 
-    required_version = (
-        requirements['platform'] + ' ' + requirements['game_version']
-        if requirements['game_version']
-        else 'Exact Windows version not documented'
-    )
+    # The Windows/GOG requirement panel is only shown for Windows ports.
+    # Android APK/OBB ports do not display it.
+    requirement_panel = ''
 
-    installer_note = (
-        'Use the full Windows offline backup installer from GOG, including '
-        'all accompanying .bin parts. Match the game-file SHA-256 in the '
-        'instructions below.'
-        if requirements['platform'] == 'Windows'
-        else
-        'This port requires the Android APK from the Epic Games Store. '
-        'A Windows installer is not used. Follow the APK version and '
-        'fingerprint requirements below.'
-    )
+    if game_platform == 'Windows':
+        required_version = (
+            'Windows ' + requirements['game_version']
+            if requirements.get('game_version')
+            else 'Exact Windows version not documented'
+        )
 
-    requirement_panel = (
-        '<aside class="notice">'
-        '<strong>Required game version: '
-        + esc(required_version)
-        + '</strong><p>'
-        + installer_note
-        + ' The port release number is separate from the original game '
-        'version.</p></aside>'
-    )
+        installer_note = (
+            'Use the full Windows offline backup installer from GOG, '
+            'including all accompanying .bin parts. Match the game-file '
+            'SHA-256 in the instructions below.'
+        )
+
+        requirement_panel = (
+            '<aside class="notice">'
+            '<strong>Required game version: '
+            + esc(required_version)
+            + '</strong><p>'
+            + installer_note
+            + ' The port release number is separate from the original '
+            'game version.</p></aside>'
+        )
 
     # Safely handle missing, empty, or malformed store metadata.
     store_entries = meta.get('store') or []
@@ -343,6 +383,7 @@ for g in catalog:
         f'''<article class="game-card" data-title="{esc(g['title'].lower())}" data-genres="{esc(' '.join(g['genres']))}"><a class="game-art" href="guides/{g['id']}.html"><img src="assets/games/{g['id']}.png" alt="{esc(g['title'])} gameplay" width="640" height="480" loading="lazy"><span class="art-link">EXPLORE PORT ↗</span></a><div class="game-body"><p class="genre">{esc(' / '.join(g['genres']).upper())}</p><h3><a href="guides/{g['id']}.html">{esc(g['title'])}</a></h3><p class="game-description">{esc(g['description'])}</p><div class="card-bottom"><span>{"TESTING RELEASE" if g["prerelease"] else "BYO GAME DATA" if g["download_url"] else "AWAITING RELEASE"}</span><a href="guides/{g['id']}.html" aria-label="View {esc(g['title'])} installation and download">View port <b>↗</b></a></div></div></article>'''
     )
 
+
 genres = sorted(
     {
         genre
@@ -350,6 +391,7 @@ genres = sorted(
         for genre in g['genres']
     }
 )
+
 
 index = (
     head('Indie games. Handheld adventures.')
@@ -367,12 +409,13 @@ index = (
     +
     ''.join(cards)
     +
-    '''</div><div id="empty" class="empty" hidden><h3>No ports found</h3><p>Try another title or genre.</p><button id="reset" class="button">Clear filters</button></div><p class="catalog-note">Every download is a bring-your-own-data package. Original games are sold separately.</p></section><section id="install" class="installation"><div class="wrap"><p class="eyebrow">FROM DOWNLOAD TO D-PAD</p><h2>Three steps. A new adventure.</h2><div class="steps"><article><span class="step-number">01</span><h3>Choose your port</h3><p>Pick a game above. Check the exact required Windows game version in its guide, then download the port ZIP.</p></article><article><span class="step-number">02</span><h3>Install with PortMaster</h3><p>Put the ZIP in PortMaster’s <code>autoinstall/</code> folder. Open PortMaster and let it install the port and required runtimes.</p></article><article><span class="step-number">03</span><h3>Bring your game files</h3><p>Copy the files from your purchased game to the folder in its guide. Launch from your handheld’s ports menu.</p></article></div><a class="text-link" href="https://portmaster.games/installation.html">Get PortMaster ↗</a></div></section><section id="about" class="about wrap"><div><p class="eyebrow">MEET THE MAKER</p><h2>A little forge.<br>A love for handhelds.</h2></div><div><p>PixelForge Ports is Ronax’s collection of indie game adaptations for ARM Linux handhelds. The aim is simple: bring more of the games you own to the devices you love.</p><p>These independent ports use PortMaster’s tools and runtimes. They are not official releases from the original game developers. Credit for each game stays with its creators.</p><a class="text-link" href="https://github.com/Pixelforge-Ports">Follow the work on GitHub ↗</a></div></section></main>'''
+    '''</div><div id="empty" class="empty" hidden><h3>No ports found</h3><p>Try another title or genre.</p><button id="reset" class="button">Clear filters</button></div><p class="catalog-note">Every download is a bring-your-own-data package. Original games are sold separately.</p></section><section id="install" class="installation"><div class="wrap"><p class="eyebrow">FROM DOWNLOAD TO D-PAD</p><h2>Three steps. A new adventure.</h2><div class="steps"><article><span class="step-number">01</span><h3>Choose your port</h3><p>Pick a game above. Check the exact required game version in its guide, then download the port ZIP.</p></article><article><span class="step-number">02</span><h3>Install with PortMaster</h3><p>Put the ZIP in PortMaster’s <code>autoinstall/</code> folder. Open PortMaster and let it install the port and required runtimes.</p></article><article><span class="step-number">03</span><h3>Bring your game files</h3><p>Copy the files from your purchased game to the folder in its guide. Launch from your handheld’s ports menu.</p></article></div><a class="text-link" href="https://portmaster.games/installation.html">Get PortMaster ↗</a></div></section><section id="about" class="about wrap"><div><p class="eyebrow">MEET THE MAKER</p><h2>A little forge.<br>A love for handhelds.</h2></div><div><p>PixelForge Ports is Ronax’s collection of indie game adaptations for ARM Linux handhelds. The aim is simple: bring more of the games you own to the devices you love.</p><p>These independent ports use PortMaster’s tools and runtimes. They are not official releases from the original game developers. Credit for each game stays with its creators.</p><a class="text-link" href="https://github.com/Pixelforge-Ports">Follow the work on GitHub ↗</a></div></section></main>'''
     +
     footer()
     +
     '''<script src="catalog.js" defer></script></body></html>'''
 )
+
 
 index = (
     index
@@ -386,10 +429,12 @@ index = (
     )
 )
 
+
 write(
     'index.html',
     index
 )
+
 
 write(
     'catalog.json',
@@ -407,13 +452,16 @@ known = {
     for g in catalog
 }
 
+
 for file in (OUT / 'guides').glob('*.html'):
     if file.stem not in known:
         file.unlink()
 
+
 for file in (OUT / 'assets/games').glob('*.png'):
     if file.stem not in known:
         file.unlink()
+
 
 for file in (OUT / 'downloads').glob('*'):
     if (

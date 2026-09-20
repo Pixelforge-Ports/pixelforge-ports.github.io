@@ -7,69 +7,265 @@ from urllib.parse import quote
 ORG = 'Pixelforge-Ports'
 API = 'https://api.github.com'
 
+
 def request(url, optional=False):
-    headers={'User-Agent':'Pixelforge-Ports-Catalog','Accept':'application/vnd.github+json'}
-    if url.startswith(API+'/') and os.environ.get('GITHUB_TOKEN'):
-        headers['Authorization']='Bearer '+os.environ['GITHUB_TOKEN']
+    headers = {
+        'User-Agent': 'Pixelforge-Ports-Catalog',
+        'Accept': 'application/vnd.github+json'
+    }
+
+    if url.startswith(API + '/') and os.environ.get('GITHUB_TOKEN'):
+        headers['Authorization'] = 'Bearer ' + os.environ['GITHUB_TOKEN']
+
     try:
-        with urlopen(Request(url, headers=headers), timeout=40) as response:
+        with urlopen(
+            Request(url, headers=headers),
+            timeout=40
+        ) as response:
             return response.read()
+
     except HTTPError as error:
-        if optional and error.code==404:return None
-        raise RuntimeError(f'GitHub request failed ({error.code}): {url}. Existing published site is unchanged.') from None
+        if optional and error.code == 404:
+            return None
+
+        raise RuntimeError(
+            f'GitHub request failed ({error.code}): {url}. '
+            'Existing published site is unchanged.'
+        ) from None
+
 
 def pages(path):
-    page=1
+    page = 1
+
     while True:
-        values=json.loads(request(f'{API}{path}?per_page=100&page={page}'))
-        if not isinstance(values,list):raise ValueError('Expected a GitHub list')
+        values = json.loads(
+            request(
+                f'{API}{path}?per_page=100&page={page}'
+            )
+        )
+
+        if not isinstance(values, list):
+            raise ValueError('Expected a GitHub list')
+
         yield from values
-        if len(values)<100:break
-        page+=1
+
+        if len(values) < 100:
+            break
+
+        page += 1
+
 
 def raw(repo, ref, path, optional=False):
-    return request(f'https://raw.githubusercontent.com/{ORG}/{quote(repo,safe="")}/{quote(ref,safe="")}/{path}',optional)
+    return request(
+        f'https://raw.githubusercontent.com/'
+        f'{ORG}/{quote(repo, safe="")}/'
+        f'{quote(ref, safe="")}/{path}',
+        optional
+    )
+
 
 def choose_release(releases, archive_name):
-    expected=archive_name.lower()
-    for release in sorted((r for r in releases if not r.get('draft')),key=lambda r:r.get('published_at') or '',reverse=True):
-        assets=[a for a in release.get('assets',[]) if a['name'].lower()==expected and a.get('state')=='uploaded']
-        if len(assets)==1:return release,assets[0]
-    return None,None
+    expected = archive_name.lower()
+
+    for release in sorted(
+        (
+            r
+            for r in releases
+            if not r.get('draft')
+        ),
+        key=lambda r: r.get('published_at') or '',
+        reverse=True
+    ):
+        assets = [
+            a
+            for a in release.get('assets', [])
+            if (
+                a['name'].lower() == expected
+                and a.get('state') == 'uploaded'
+            )
+        ]
+
+        if len(assets) == 1:
+            return release, assets[0]
+
+    return None, None
+
 
 def discover():
-    records=[]
+    records = []
+
     for repo in pages(f'/orgs/{ORG}/repos'):
-        if repo.get('archived') or repo.get('private'):continue
-        name=repo['name'];ref=repo['default_branch']
-        metadata=raw(name,ref,'package/port.json',True)
-        if metadata is None:continue
-        metadata=json.loads(metadata)
-        game=metadata['name'].removesuffix('.zip')
-        if not re.fullmatch(r'[a-z0-9_-]+',game):raise ValueError('Unsafe port ID')
-        release,asset=choose_release(list(pages(f'/repos/{ORG}/{name}/releases')),metadata['name'])
-        # A release's guide and screenshot must describe that release, not unpublished changes.
+        if repo.get('archived') or repo.get('private'):
+            continue
+
+        name = repo['name']
+        ref = repo['default_branch']
+
+        metadata = raw(
+            name,
+            ref,
+            'package/port.json',
+            True
+        )
+
+        if metadata is None:
+            continue
+
+        metadata = json.loads(metadata)
+
+        game = metadata['name'].removesuffix('.zip')
+
+        if not re.fullmatch(r'[a-z0-9_-]+', game):
+            raise ValueError('Unsafe port ID')
+
+        release, asset = choose_release(
+            list(
+                pages(
+                    f'/repos/{ORG}/{name}/releases'
+                )
+            ),
+            metadata['name']
+        )
+
+        # A release's guide and screenshot must describe that release,
+        # not unpublished changes.
         if release:
-            ref=release['tag_name']
-            release_metadata=raw(name,ref,'package/port.json',True)
+            ref = release['tag_name']
+
+            release_metadata = raw(
+                name,
+                ref,
+                'package/port.json',
+                True
+            )
+
             if release_metadata is None:
-                raise ValueError(f'{name}: release {ref} needs package/port.json at its tag')
-            metadata=json.loads(release_metadata)
-        readme=raw(name,ref,'package/README.md',True) or raw(name,ref,'README.md')
-        screenshot=raw(name,ref,'package/screenshot.png')
-        if not screenshot.startswith(b'\x89PNG\r\n\x1a\n'):raise ValueError(f'{name}: invalid screenshot')
-        attrs=metadata['attr']
-        if not isinstance(attrs.get('title'),str) or not isinstance(attrs.get('genres'),list):raise ValueError(f'{name}: invalid metadata')
-        item={'id':game,'meta':attrs,'readme':readme.decode('utf-8-sig'),'screenshot':screenshot,
-              'repository':repo['html_url'],'ref':ref,'zip':asset['name'] if asset else metadata['name'],
-              'download_url':asset['browser_download_url'] if asset else None,
-              'size':asset['size'] if asset else 0,'sha256':None,
-              'release_url':release['html_url'] if release else None,
-              'version':release['tag_name'] if release else None,
-              'prerelease':release['prerelease'] if release else False}
-        if asset and asset.get('digest','') and re.fullmatch(r'sha256:[0-9a-f]{64}',asset['digest']):item['sha256']=asset['digest'][7:]
+                raise ValueError(
+                    f'{name}: release {ref} needs '
+                    'package/port.json at its tag'
+                )
+
+            metadata = json.loads(
+                release_metadata
+            )
+
+        readme = (
+            raw(
+                name,
+                ref,
+                'package/README.md',
+                True
+            )
+            or
+            raw(
+                name,
+                ref,
+                'README.md'
+            )
+        )
+
+        screenshot = raw(
+            name,
+            ref,
+            'package/screenshot.png'
+        )
+
+        if not screenshot.startswith(
+            b'\x89PNG\r\n\x1a\n'
+        ):
+            raise ValueError(
+                f'{name}: invalid screenshot'
+            )
+
+        attrs = metadata['attr']
+
+        if (
+            not isinstance(
+                attrs.get('title'),
+                str
+            )
+            or
+            not isinstance(
+                attrs.get('genres'),
+                list
+            )
+        ):
+            raise ValueError(
+                f'{name}: invalid metadata'
+            )
+
+        item = {
+            'id': game,
+            'meta': attrs,
+            'readme': readme.decode('utf-8-sig'),
+            'screenshot': screenshot,
+            'repository': repo['html_url'],
+            'ref': ref,
+            'zip': (
+                asset['name']
+                if asset
+                else metadata['name']
+            ),
+            'download_url': (
+                asset['browser_download_url']
+                if asset
+                else None
+            ),
+            'size': (
+                asset['size']
+                if asset
+                else 0
+            ),
+            'sha256': None,
+            'release_url': (
+                release['html_url']
+                if release
+                else None
+            ),
+            'version': (
+                release['tag_name']
+                if release
+                else None
+            ),
+            'prerelease': (
+                release['prerelease']
+                if release
+                else False
+            )
+        }
+
+        if (
+            asset
+            and asset.get('digest', '')
+            and re.fullmatch(
+                r'sha256:[0-9a-f]{64}',
+                asset['digest']
+            )
+        ):
+            item['sha256'] = (
+                asset['digest'][7:]
+            )
+
         records.append(item)
-        print(f"FOUND {game}: {item['version'] or 'no published ZIP'}",flush=True)
-    if not records:raise ValueError('No ports found; refusing to publish an empty catalog')
-    if len({r['id'] for r in records})!=len(records):raise ValueError('Duplicate port IDs in organization')
+
+        print(
+            f"FOUND {game}: "
+            f"{item['version'] or 'no published ZIP'}",
+            flush=True
+        )
+
+    if not records:
+        raise ValueError(
+            'No ports found; refusing to publish '
+            'an empty catalog'
+        )
+
+    if (
+        len({r['id'] for r in records})
+        != len(records)
+    ):
+        raise ValueError(
+            'Duplicate port IDs in organization'
+        )
+
     return records
