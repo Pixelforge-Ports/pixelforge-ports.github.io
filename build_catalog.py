@@ -78,7 +78,7 @@ def footer(prefix='./'):
 def head(
     title,
     prefix='./',
-    desc='Indie adventures, forged for your retro handheld. Browse ARM64 Linux ports by Pixelforge ports (Ronax).'
+    desc='Indie adventures, forged for your retro handheld. Browse ARM Linux ports by Pixelforge ports (Ronax).'
 ):
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0c101b"><meta name="description" content="{esc(desc)}"><title>{esc(title)} · PixelForge Ports</title><link rel="icon" href="{prefix}assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="{prefix}styles.css"></head><body>'''
 
@@ -91,6 +91,53 @@ def write(name, text):
         encoding='utf-8',
         newline='\n'
     )
+
+
+def normalize_list(value):
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return value
+
+    if isinstance(value, tuple):
+        return list(value)
+
+    if isinstance(value, str):
+        return [value]
+
+    return []
+
+
+def runtime_label(runtime):
+    runtime_text = str(runtime)
+    runtime_lower = runtime_text.lower()
+
+    if 'weston' in runtime_lower:
+        return 'Westonpack'
+
+    if (
+        'zulu17' in runtime_lower
+        or 'java17' in runtime_lower
+        or 'java_17' in runtime_lower
+    ):
+        return 'Java 17'
+
+    if (
+        'zulu21' in runtime_lower
+        or 'java21' in runtime_lower
+        or 'java_21' in runtime_lower
+    ):
+        return 'Java 21'
+
+    if (
+        'zulu11' in runtime_lower
+        or 'java11' in runtime_lower
+        or 'java_11' in runtime_lower
+    ):
+        return 'Java 11'
+
+    return runtime_text.removesuffix('.squashfs')
 
 
 records = discover()
@@ -132,14 +179,18 @@ for record in records:
 
     requirements = game_requirements(readme)
 
-    requirement_instructions = requirements.get('instructions') or ''
+    requirement_instructions = (
+        requirements.get('instructions')
+        or ''
+    )
 
-    # Detect Android ports even when game_requirements.py cannot detect them.
+    # Android detection.
     #
-    # Some ports, such as Need for Speed: Most Wanted, use "## Installation"
-    # rather than a "## Get ..." section. Check the complete README and
-    # package metadata for APK/OBB references instead of relying only on
-    # game_requirements.py.
+    # Some Android ports do not have the "## Get ..." section expected by
+    # game_requirements.py. NFS Most Wanted, for example, puts its APK/OBB
+    # instructions under "## Installation".
+    #
+    # Inspect the complete README and port metadata as a fallback.
     android_source = '\n'.join([
         readme,
         str(meta.get('desc') or ''),
@@ -149,7 +200,7 @@ for record in records:
 
     android_hint = bool(
         re.search(
-            r'\bAPK\b|\.apk\b|\bOBB\b|\.obb\b',
+            r'\bAndroid\b|\bAPK\b|\.apk\b|\bOBB\b|\.obb\b',
             android_source,
             re.I
         )
@@ -280,8 +331,7 @@ for record in records:
         )
     )
 
-    # The Windows/GOG requirement panel is only shown for Windows ports.
-    # Android APK/OBB ports do not display it.
+    # Only Windows ports display the Windows/GOG requirement panel.
     requirement_panel = ''
 
     if game_platform == 'Windows':
@@ -307,11 +357,10 @@ for record in records:
             'game version.</p></aside>'
         )
 
-    # Safely handle missing, empty, or malformed store metadata.
-    store_entries = meta.get('store') or []
-
-    if not isinstance(store_entries, list):
-        store_entries = []
+    # Safely handle missing, empty or malformed store metadata.
+    store_entries = normalize_list(
+        meta.get('store')
+    )
 
     store_links = []
 
@@ -337,7 +386,9 @@ for record in records:
         if not isinstance(store_entry, dict):
             continue
 
-        developer_url = store_entry.get('developerurl')
+        developer_url = store_entry.get(
+            'developerurl'
+        )
 
         if developer_url:
             developer_link = (
@@ -345,6 +396,120 @@ for record in records:
                 'Visit the game developer ↗</a>'
             )
             break
+
+    # ------------------------------------------------------------
+    # Dynamic "Before you play" information from port.json
+    # ------------------------------------------------------------
+
+    arch_entries = normalize_list(
+        meta.get('arch')
+    )
+
+    arch_names = {
+        'aarch64': '64-bit ARM Linux',
+        'arm64': '64-bit ARM Linux',
+        'armhf': '32-bit ARM Linux',
+        'armv7': '32-bit ARM Linux',
+        'armv7l': '32-bit ARM Linux',
+        'x86_64': '64-bit x86 Linux',
+    }
+
+    platform_names = []
+
+    for arch in arch_entries:
+        arch_key = str(arch).lower()
+
+        platform_name = arch_names.get(
+            arch_key,
+            str(arch)
+        )
+
+        if platform_name not in platform_names:
+            platform_names.append(
+                platform_name
+            )
+
+    platform_text = (
+        ' / '.join(platform_names)
+        or 'Linux'
+    )
+
+    # Runtime is taken directly from package/port.json.
+    #
+    # Example:
+    #
+    # "runtime": []
+    #
+    # -> no Runtime row at all.
+    #
+    # "runtime": [
+    #   "weston_pkg_0.2.squashfs",
+    #   "zulu17.54.21-ca-jre17.0.13-linux.squashfs"
+    # ]
+    #
+    # -> Runtime: Westonpack + Java 17
+    runtime_entries = normalize_list(
+        meta.get('runtime')
+    )
+
+    runtime_names = []
+
+    for runtime in runtime_entries:
+        name = runtime_label(runtime)
+
+        if name and name not in runtime_names:
+            runtime_names.append(name)
+
+    specs_runtime = ''
+
+    if runtime_names:
+        specs_runtime = (
+            '<dt>Runtime</dt>'
+            '<dd>'
+            + esc(' + '.join(runtime_names))
+            + '</dd>'
+        )
+
+    # Minimum glibc is also read from each port's metadata.
+    min_glibc = meta.get('min_glibc')
+
+    specs_glibc = ''
+
+    if min_glibc:
+        specs_glibc = (
+            '<dt>Minimum glibc</dt>'
+            '<dd>'
+            + esc(min_glibc)
+            + '</dd>'
+        )
+
+    # Use actual porter information from port.json.
+    porter_entries = normalize_list(
+        meta.get('porter')
+    )
+
+    porter_entries = [
+        str(porter)
+        for porter in porter_entries
+        if str(porter).strip()
+    ]
+
+    porter_text = (
+        ', '.join(porter_entries)
+        or 'Pixelforge ports (Ronax)'
+    )
+
+    # Only include the runtime installation instruction when runtimes
+    # are actually declared by the port.
+    runtime_install_step = ''
+
+    if runtime_names:
+        runtime_install_step = (
+            '<li>Allow PortMaster to download '
+            + esc(' and '.join(runtime_names))
+            + '. An internet connection is needed if these runtimes '
+            'are not installed.</li>'
+        )
 
     page = (
         head(
@@ -355,7 +520,7 @@ for record in records:
         +
         header('../')
         +
-        f'''<main id="main" class="detail"><a class="back-link" href="../index.html#ports">← Back to the port library</a><div class="detail-hero"><img class="detail-image" src="../assets/games/{game}.png" alt="{esc(title)} gameplay" width="640" height="480"><div><span class="eyebrow">{' / '.join(meta['genres']).upper()}</span><h1>{esc(title)}</h1><p class="lead">{esc(meta['desc'])}</p><div class="tags"><span>ARM64 LINUX</span><span>GAME FILES REQUIRED</span></div>{requirement_panel}{download}<p class="small">Port files only. Purchase the original game separately.</p>{store}</div></div>{special}<div class="detail-columns"><article><section><h2>Bring your game</h2>{prose(game_data)}</section><section><h2>Install the port</h2><ol class="install-list"><li>Update PortMaster. Copy <strong>{esc(archive_name)}</strong> into its <code>autoinstall/</code> folder and open PortMaster.</li><li>Allow PortMaster to download Java 17 and Westonpack. An internet connection is needed if these runtimes are not installed.</li><li>Copy the owned game files into <code>{game}/</code> as described above. Launch <strong>{esc(title)}</strong> from your ports menu.</li></ol><details><summary>Manual installation paths</summary>{prose(section(readme, 'Installation'))}</details></section><section><h2>Handheld controls</h2>{table}{prose(controls_note)}</section><section><h2>Saves & troubleshooting</h2>{prose(section(readme, 'Saves and troubleshooting'))}</section></article><aside class="specs"><h2>Before you play</h2><dl><dt>Platform</dt><dd>64-bit ARM Linux</dd><dt>Runtime</dt><dd>Java 17 + Westonpack</dd><dt>Controls</dt><dd>gptokeyb2</dd><dt>Minimum glibc</dt><dd>2.27</dd><dt>Porter</dt><dd>Pixelforge ports (Ronax)</dd></dl><p>Compatibility depends on your firmware, graphics driver and game version. Device testing is ongoing.</p>{checksum}{developer_link}</aside></div></main>'''
+        f'''<main id="main" class="detail"><a class="back-link" href="../index.html#ports">← Back to the port library</a><div class="detail-hero"><img class="detail-image" src="../assets/games/{game}.png" alt="{esc(title)} gameplay" width="640" height="480"><div><span class="eyebrow">{' / '.join(meta['genres']).upper()}</span><h1>{esc(title)}</h1><p class="lead">{esc(meta['desc'])}</p><div class="tags"><span>ARM LINUX</span><span>GAME FILES REQUIRED</span></div>{requirement_panel}{download}<p class="small">Port files only. Purchase the original game separately.</p>{store}</div></div>{special}<div class="detail-columns"><article><section><h2>Bring your game</h2>{prose(game_data)}</section><section><h2>Install the port</h2><ol class="install-list"><li>Update PortMaster. Copy <strong>{esc(archive_name)}</strong> into its <code>autoinstall/</code> folder and open PortMaster.</li>{runtime_install_step}<li>Copy the owned game files into <code>{game}/</code> as described above. Launch <strong>{esc(title)}</strong> from your ports menu.</li></ol><details><summary>Manual installation paths</summary>{prose(section(readme, 'Installation'))}</details></section><section><h2>Handheld controls</h2>{table}{prose(controls_note)}</section><section><h2>Saves & troubleshooting</h2>{prose(section(readme, 'Saves and troubleshooting'))}</section></article><aside class="specs"><h2>Before you play</h2><dl><dt>Platform</dt><dd>{esc(platform_text)}</dd>{specs_runtime}<dt>Controls</dt><dd>gptokeyb2</dd>{specs_glibc}<dt>Porter</dt><dd>{esc(porter_text)}</dd></dl><p>Compatibility depends on your firmware, graphics driver and game version. Device testing is ongoing.</p>{checksum}{developer_link}</aside></div></main>'''
         +
         footer('../')
         +
@@ -394,11 +559,13 @@ genres = sorted(
 
 
 index = (
-    head('Indie games. Handheld adventures.')
+    head(
+        'Indie games. Handheld adventures.'
+    )
     +
     header()
     +
-    '''<main id="main"><section class="hero"><div class="hero-content"><p class="eyebrow"><span class="tiny-diamond">◆</span> INDEPENDENT PORTS FOR ARM LINUX</p><h1>SMALL SCREEN.<br>BIG <span>ADVENTURES.</span></h1><p class="hero-copy">Your favorite indie worlds, reforged for retro handhelds.<br>Made for the PortMaster ecosystem by Ronax.</p><a class="button primary" href="#ports">EXPLORE THE PORTS <span>↓</span></a><a class="hero-secondary" href="#install">New to PortMaster? Start here ↗</a></div><div class="hero-caption">THE PIXELFORGE <span>EST. 2026</span></div></section><div class="compat-strip"><span>BUILT FOR THE POCKET</span><strong>ANBERNIC</strong><strong>R36S</strong><strong>TRIMUI</strong><span>Compatible ARM64 firmware required</span></div><section id="ports" class="library wrap"><div class="section-heading"><div><p class="eyebrow">PICK YOUR NEXT ADVENTURE</p><h2>Fresh from the forge<span class="orange">.</span></h2></div><span class="count-badge">12 PORTS / ARM64</span></div><div class="catalog-tools"><label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Find your next game…" aria-label="Search ports"></label><label class="genre-select">Genre <select id="genre"><option value="">All genres</option>'''
+    '''<main id="main"><section class="hero"><div class="hero-content"><p class="eyebrow"><span class="tiny-diamond">◆</span> INDEPENDENT PORTS FOR ARM LINUX</p><h1>SMALL SCREEN.<br>BIG <span>ADVENTURES.</span></h1><p class="hero-copy">Your favorite indie worlds, reforged for retro handhelds.<br>Made for the PortMaster ecosystem by Ronax.</p><a class="button primary" href="#ports">EXPLORE THE PORTS <span>↓</span></a><a class="hero-secondary" href="#install">New to PortMaster? Start here ↗</a></div><div class="hero-caption">THE PIXELFORGE <span>EST. 2026</span></div></section><div class="compat-strip"><span>BUILT FOR THE POCKET</span><strong>ANBERNIC</strong><strong>R36S</strong><strong>TRIMUI</strong><span>Compatible ARM Linux firmware required</span></div><section id="ports" class="library wrap"><div class="section-heading"><div><p class="eyebrow">PICK YOUR NEXT ADVENTURE</p><h2>Fresh from the forge<span class="orange">.</span></h2></div><span class="count-badge">12 PORTS / ARM LINUX</span></div><div class="catalog-tools"><label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Find your next game…" aria-label="Search ports"></label><label class="genre-select">Genre <select id="genre"><option value="">All genres</option>'''
     +
     ''.join(
         f'<option value="{esc(g)}">{esc(g.title())}</option>'
@@ -409,7 +576,7 @@ index = (
     +
     ''.join(cards)
     +
-    '''</div><div id="empty" class="empty" hidden><h3>No ports found</h3><p>Try another title or genre.</p><button id="reset" class="button">Clear filters</button></div><p class="catalog-note">Every download is a bring-your-own-data package. Original games are sold separately.</p></section><section id="install" class="installation"><div class="wrap"><p class="eyebrow">FROM DOWNLOAD TO D-PAD</p><h2>Three steps. A new adventure.</h2><div class="steps"><article><span class="step-number">01</span><h3>Choose your port</h3><p>Pick a game above. Check the exact required game version in its guide, then download the port ZIP.</p></article><article><span class="step-number">02</span><h3>Install with PortMaster</h3><p>Put the ZIP in PortMaster’s <code>autoinstall/</code> folder. Open PortMaster and let it install the port and required runtimes.</p></article><article><span class="step-number">03</span><h3>Bring your game files</h3><p>Copy the files from your purchased game to the folder in its guide. Launch from your handheld’s ports menu.</p></article></div><a class="text-link" href="https://portmaster.games/installation.html">Get PortMaster ↗</a></div></section><section id="about" class="about wrap"><div><p class="eyebrow">MEET THE MAKER</p><h2>A little forge.<br>A love for handhelds.</h2></div><div><p>PixelForge Ports is Ronax’s collection of indie game adaptations for ARM Linux handhelds. The aim is simple: bring more of the games you own to the devices you love.</p><p>These independent ports use PortMaster’s tools and runtimes. They are not official releases from the original game developers. Credit for each game stays with its creators.</p><a class="text-link" href="https://github.com/Pixelforge-Ports">Follow the work on GitHub ↗</a></div></section></main>'''
+    '''</div><div id="empty" class="empty" hidden><h3>No ports found</h3><p>Try another title or genre.</p><button id="reset" class="button">Clear filters</button></div><p class="catalog-note">Every download is a bring-your-own-data package. Original games are sold separately.</p></section><section id="install" class="installation"><div class="wrap"><p class="eyebrow">FROM DOWNLOAD TO D-PAD</p><h2>Three steps. A new adventure.</h2><div class="steps"><article><span class="step-number">01</span><h3>Choose your port</h3><p>Pick a game above. Check the exact required game version in its guide, then download the port ZIP.</p></article><article><span class="step-number">02</span><h3>Install with PortMaster</h3><p>Put the ZIP in PortMaster’s <code>autoinstall/</code> folder. Open PortMaster and let it install the port and any declared runtimes.</p></article><article><span class="step-number">03</span><h3>Bring your game files</h3><p>Copy the files from your purchased game to the folder in its guide. Launch from your handheld’s ports menu.</p></article></div><a class="text-link" href="https://portmaster.games/installation.html">Get PortMaster ↗</a></div></section><section id="about" class="about wrap"><div><p class="eyebrow">MEET THE MAKER</p><h2>A little forge.<br>A love for handhelds.</h2></div><div><p>PixelForge Ports is Ronax’s collection of indie game adaptations for ARM Linux handhelds. The aim is simple: bring more of the games you own to the devices you love.</p><p>These independent ports use PortMaster’s tools and runtimes. They are not official releases from the original game developers. Credit for each game stays with its creators.</p><a class="text-link" href="https://github.com/Pixelforge-Ports">Follow the work on GitHub ↗</a></div></section></main>'''
     +
     footer()
     +
@@ -420,12 +587,15 @@ index = (
 index = (
     index
     .replace(
-        '12 PORTS / ARM64',
-        str(len(catalog)) + ' PORTS / ARM64'
+        '12 PORTS / ARM LINUX',
+        str(len(catalog))
+        + ' PORTS / ARM LINUX'
     )
     .replace(
         'Showing 12 ports',
-        'Showing ' + str(len(catalog)) + ' ports'
+        'Showing '
+        + str(len(catalog))
+        + ' ports'
     )
 )
 
@@ -453,17 +623,23 @@ known = {
 }
 
 
-for file in (OUT / 'guides').glob('*.html'):
+for file in (
+    OUT / 'guides'
+).glob('*.html'):
     if file.stem not in known:
         file.unlink()
 
 
-for file in (OUT / 'assets/games').glob('*.png'):
+for file in (
+    OUT / 'assets/games'
+).glob('*.png'):
     if file.stem not in known:
         file.unlink()
 
 
-for file in (OUT / 'downloads').glob('*'):
+for file in (
+    OUT / 'downloads'
+).glob('*'):
     if (
         file.is_file()
         and (
