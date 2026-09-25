@@ -91,6 +91,43 @@ def choose_release(releases, archive_name):
     return None, None
 
 
+def release_history(releases, archive_name):
+    """Return every published release with its notes and matching build asset."""
+    expected = archive_name.lower()
+    history = []
+
+    for release in sorted(
+        (r for r in releases if not r.get('draft')),
+        key=lambda r: r.get('published_at') or '',
+        reverse=True
+    ):
+        assets = [
+            asset
+            for asset in release.get('assets', [])
+            if asset.get('name', '').lower() == expected
+            and asset.get('state') == 'uploaded'
+        ]
+        asset = assets[0] if len(assets) == 1 else None
+        digest = asset.get('digest') if asset else None
+        history.append({
+            'version': release.get('tag_name') or 'Untitled release',
+            'published_at': release.get('published_at'),
+            'prerelease': bool(release.get('prerelease')),
+            'release_url': release.get('html_url'),
+            'notes': release.get('body') or '',
+            'download_url': asset.get('browser_download_url') if asset else None,
+            'size': asset.get('size') if asset else None,
+            'sha256': (
+                digest[7:]
+                if isinstance(digest, str)
+                and re.fullmatch(r'sha256:[0-9a-f]{64}', digest)
+                else None
+            )
+        })
+
+    return history
+
+
 def discover():
     records = []
 
@@ -118,14 +155,9 @@ def discover():
         if not re.fullmatch(r'[a-z0-9_-]+', game):
             raise ValueError('Unsafe port ID')
 
-        release, asset = choose_release(
-            list(
-                pages(
-                    f'/repos/{ORG}/{name}/releases'
-                )
-            ),
-            metadata['name']
-        )
+        releases = list(pages(f'/repos/{ORG}/{name}/releases'))
+        history = release_history(releases, metadata['name'])
+        release, asset = choose_release(releases, metadata['name'])
 
         # A release's guide and screenshot must describe that release,
         # not unpublished changes.
@@ -231,7 +263,8 @@ def discover():
                 release['prerelease']
                 if release
                 else False
-            )
+            ),
+            'releases': history
         }
 
         if (

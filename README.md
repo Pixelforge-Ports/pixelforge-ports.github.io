@@ -39,6 +39,12 @@ so they match the selected package. Keep those files at the tag. Unreleased port
 use the default branch. Checksums are displayed only when GitHub supplies an asset
 SHA-256 digest; the website does not verify release ZIP contents itself.
 
+Each port guide also shows the notes for every non-draft GitHub release, ordered
+newest first and labeled with its tag and publication date. The newest entry is
+expanded on arrival; older entries can be opened individually. Matching port ZIPs
+link to their own release asset, while releases without a matching ZIP still show
+their notes and GitHub release page. Draft releases are excluded.
+
 ## Add a new port
 
 Create a public, non-archived repository in Pixelforge-Ports with:

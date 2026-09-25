@@ -6,6 +6,7 @@ import re
 
 from github_catalog import discover
 from game_requirements import game_requirements
+from release_notes import render_release_history
 from support_section import render_support
 
 
@@ -173,7 +174,8 @@ for record in records:
             'download_url',
             'release_url',
             'version',
-            'prerelease'
+            'prerelease',
+            'releases'
         ]
     }
 
@@ -511,6 +513,8 @@ for record in records:
             'are not installed.</li>'
         )
 
+    release_notes = render_release_history(record.get('releases', []))
+
     page = (
         head(
             title,
@@ -520,7 +524,7 @@ for record in records:
         +
         header('../')
         +
-        f'''<main id="main" class="detail"><a class="back-link" href="../index.html#ports">← Back to the port library</a><div class="detail-hero"><img class="detail-image" src="../assets/games/{game}.png" alt="{esc(title)} gameplay" width="640" height="480"><div><span class="eyebrow">{' / '.join(meta['genres']).upper()}</span><h1>{esc(title)}</h1><p class="lead">{esc(meta['desc'])}</p><div class="tags"><span>ARM LINUX</span><span>GAME FILES REQUIRED</span></div>{requirement_panel}{download}<p class="small">Port files only. Purchase the original game separately.</p>{store}</div></div>{special}<div class="detail-columns"><article><section><h2>Bring your game</h2>{prose(game_data)}</section><section><h2>Install the port</h2><ol class="install-list"><li>Update PortMaster. Copy <strong>{esc(archive_name)}</strong> into its <code>autoinstall/</code> folder and open PortMaster.</li>{runtime_install_step}<li>Copy the owned game files into <code>{game}/</code> as described above. Launch <strong>{esc(title)}</strong> from your ports menu.</li></ol><details><summary>Manual installation paths</summary>{prose(section(readme, 'Installation'))}</details></section><section><h2>Handheld controls</h2>{table}{prose(controls_note)}</section><section><h2>Saves & troubleshooting</h2>{prose(section(readme, 'Saves and troubleshooting'))}</section></article><aside class="specs"><h2>Before you play</h2><dl><dt>Platform</dt><dd>{esc(platform_text)}</dd>{specs_runtime}<dt>Controls</dt><dd>gptokeyb2</dd>{specs_glibc}<dt>Porter</dt><dd>{esc(porter_text)}</dd></dl><p>Compatibility depends on your firmware, graphics driver and game version. Device testing is ongoing.</p>{checksum}{developer_link}</aside></div></main>'''
+        f'''<main id="main" class="detail"><a class="back-link" href="../index.html#ports">← Back to the port library</a><div class="detail-hero"><img class="detail-image" src="../assets/games/{game}.png" alt="{esc(title)} gameplay" width="640" height="480"><div><span class="eyebrow">{' / '.join(meta['genres']).upper()}</span><h1>{esc(title)}</h1><p class="lead">{esc(meta['desc'])}</p><div class="tags"><span>ARM LINUX</span><span>GAME FILES REQUIRED</span></div>{requirement_panel}{download}<p class="small">Port files only. Purchase the original game separately.</p>{store}</div></div>{special}<section class="release-notes"><h2>Build release notes</h2><p class="small">Notes are shown for each published release, alongside the build tag they describe.</p>{release_notes}</section><div class="detail-columns"><article><section><h2>Bring your game</h2>{prose(game_data)}</section><section><h2>Install the port</h2><ol class="install-list"><li>Update PortMaster. Copy <strong>{esc(archive_name)}</strong> into its <code>autoinstall/</code> folder and open PortMaster.</li>{runtime_install_step}<li>Copy the owned game files into <code>{game}/</code> as described above. Launch <strong>{esc(title)}</strong> from your ports menu.</li></ol><details><summary>Manual installation paths</summary>{prose(section(readme, 'Installation'))}</details></section><section><h2>Handheld controls</h2>{table}{prose(controls_note)}</section><section><h2>Saves & troubleshooting</h2>{prose(section(readme, 'Saves and troubleshooting'))}</section></article><aside class="specs"><h2>Before you play</h2><dl><dt>Platform</dt><dd>{esc(platform_text)}</dd>{specs_runtime}<dt>Controls</dt><dd>gptokeyb2</dd>{specs_glibc}<dt>Porter</dt><dd>{esc(porter_text)}</dd></dl><p>Compatibility depends on your firmware, graphics driver and game version. Device testing is ongoing.</p>{checksum}{developer_link}</aside></div></main>'''
         +
         footer('../')
         +
